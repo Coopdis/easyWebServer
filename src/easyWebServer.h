@@ -3,17 +3,7 @@
 
 #define WEB_PORT          80
 
-void inline   webServerDebug( const char* format ... ) {
-    char str[200];
-    
-    va_list args;
-    va_start(args, format);
-    
-    vsnprintf(str, sizeof(str), format, args);
-    Serial.print( str );
-        
-    va_end(args);
-}
+void webServerDebug( const char* format ... );
 
 void webServerInit( void );
 void webServerConnectCb(void *arg);
