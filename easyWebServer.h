@@ -11,8 +11,7 @@ void inline   webServerDebug( const char* format ... ) {
     
     vsnprintf(str, sizeof(str), format, args);
     Serial.print( str );
-    //    broadcastWsMessage(str, strlen(str), OPCODE_TEXT);
-    
+        
     va_end(args);
 }
 

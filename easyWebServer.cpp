@@ -11,6 +11,8 @@ extern "C" {
 espconn webServerConn;
 esp_tcp webServerTcp;
 
+char outGoing[500];
+uint16_t outIndex = 0;
 
 //***********************************************************************
 void ICACHE_FLASH_ATTR webServerInit( void ) {
@@ -60,7 +62,7 @@ void ICACHE_FLASH_ATTR webServerRecvCb(void *arg, char *data, unsigned short len
     
     String msg = "";
     char ch;
-    //uint16_t msgLength = 0;
+    uint16_t msgLength = 0;
     
     String header;
     String extension = path.substring( path.lastIndexOf(".") + 1 );
@@ -71,15 +73,8 @@ void ICACHE_FLASH_ATTR webServerRecvCb(void *arg, char *data, unsigned short len
         msg = "File-->" + path + "<-- not found - this should be 404\r\n";
     }
     else {
+        webServerDebug("file Size=%u\n", f.size() );
         webServerDebug("path=%s\n", path.c_str() );
-        while ( f.available() ) {
-            ch = f.read();
-            msg.concat( ch );
-            //msgLength++;
-        }
-        
-        //webServerDebug("msgLength=%d extention=%s\n", msgLength, extension.c_str() );
-        webServerDebug("msgLength=%d extention=%s\n", msg.length(), extension.c_str() );
         
         header += "HTTP/1.0 200 OK\r\n";
         //header += "Server: easyWebserver on esp8266\r\n";
@@ -103,13 +98,26 @@ void ICACHE_FLASH_ATTR webServerRecvCb(void *arg, char *data, unsigned short len
             webServerDebug("webServerRecvCb(): Wierd file type. path=%s", path.c_str());
         
         header += "Content-Length: ";
-        header += msg.length();
+        header += f.size(); //msg.length();
         header += "\r\n\r\n";
 
-        msg = header + msg + "\r\n";
+        webServerDebug("header.length()=%u\n", header.length() );
+        
+        strncpy(outGoing, header.c_str(), header.length() );
+        outIndex = header.length();
+        
+        while ( f.available() ) {
+            outGoing[outIndex++] = f.read();
+            msgLength++;
+        }
+        
+        outGoing[outIndex] = 0;
+        
+        webServerDebug("outGoing=\n%s\n", outGoing);
     }
     
-    espconn_send(activeConn, (uint8*)msg.c_str(), msg.length());
+    espconn_send(activeConn, (uint8*)outGoing, outIndex);
+    espconn_disconnect( activeConn );
 }
 
 /***********************************************************************/
