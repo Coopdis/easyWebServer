@@ -6,8 +6,8 @@ extern "C" {
 #include "espconn.h"
 }
 
-#define   WIFI_SSID       “SSID”
-#define   WIFI_PASSWORD   “PASSWORD”
+#define   WIFI_SSID       "ssid"
+#define   WIFI_PASSWORD   "password"
 
 void setup() {
   Serial.begin( 115200 );
