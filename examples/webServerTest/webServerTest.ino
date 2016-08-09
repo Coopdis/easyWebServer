@@ -6,14 +6,8 @@ extern "C" {
 #include "espconn.h"
 }
 
-#define   WIFI_SSID       "Velkess"
-#define   WIFI_PASSWORD   "M3d1um=M355@g3"
-
-char ssid[32] = WIFI_SSID;
-char password[64] = WIFI_PASSWORD;
-
-// functions
-void apInit( void );
+#define   WIFI_SSID       “SSID”
+#define   WIFI_PASSWORD   “PASSWORD”
 
 void setup() {
   Serial.begin( 115200 );
