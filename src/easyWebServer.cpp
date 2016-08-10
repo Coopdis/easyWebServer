@@ -46,20 +46,20 @@ void ICACHE_FLASH_ATTR webServerInit( void ) {
     else
         webServerDebug("web server on port %d FAILED ret=%d\r\n", WEB_PORT, ret);
     
-    os_timer_setfn( &cleanUpTimer, &cleanUpCb, NULL);
+    os_timer_setfn( &cleanUpTimer, &webServerCleanUpCb, NULL);
     os_timer_arm( &cleanUpTimer, 1000, 1 );
 
     return;
 }
 
 //***********************************************************************
-void ICACHE_FLASH_ATTR cleanUpCb( void *arg ) {
+void ICACHE_FLASH_ATTR webServerCleanUpCb( void *arg ) {
     uint32_t now = system_get_time();
     
     SimpleList<webServerConnectionType>::iterator connection = connections.begin();
     while ( connection != connections.end() ) {
         if ( now > connection->timeCreated + CONNECTION_TIMEOUT ) {
-            webServerDebug("cleanUpCb(): cleaned out idle connection=0x%x\n", connection->esp_conn);
+            webServerDebug("webServerCleanUpCb(): cleaned out idle connection=0x%x\n", connection->esp_conn);
             espconn_disconnect( connection->esp_conn );
             connection = connections.erase( connection );
         }

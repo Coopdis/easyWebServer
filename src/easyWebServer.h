@@ -31,6 +31,6 @@ void webServerSentCb(void *arg);
 void webServerDisconCb(void *arg);
 void webServerReconCb(void *arg, sint8 err);
 
-void ICACHE_FLASH_ATTR cleanUpCb( void *arg );
+void ICACHE_FLASH_ATTR webServerCleanUpCb( void *arg );
 
 #endif //_MESH_WEB_SERVER_H_
