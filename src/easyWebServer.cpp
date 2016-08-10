@@ -1,15 +1,22 @@
 #include <Arduino.h>
+#include <SimpleList.h>
 
 extern "C" {
 #include "user_interface.h"
 #include "espconn.h"
+#include "osapi.h"
 }
 
 #include "easyWebServer.h"
 #include "FS.h"
 
+
 espconn webServerConn;
 esp_tcp webServerTcp;
+
+SimpleList<webServerConnectionType> connections;
+
+os_timer_t  cleanUpTimer;
 
 void webServerDebug( const char* format ... ) {
     char str[200];
@@ -39,124 +46,196 @@ void ICACHE_FLASH_ATTR webServerInit( void ) {
     else
         webServerDebug("web server on port %d FAILED ret=%d\r\n", WEB_PORT, ret);
     
+    os_timer_setfn( &cleanUpTimer, &cleanUpCb, NULL);
+    os_timer_arm( &cleanUpTimer, 1000, 1 );
+
     return;
 }
 
 //***********************************************************************
-void ICACHE_FLASH_ATTR webServerConnectCb(void *arg) {
-  struct espconn *newConn = (espconn *)arg;
+void ICACHE_FLASH_ATTR cleanUpCb( void *arg ) {
+    uint32_t now = system_get_time();
+    
+    SimpleList<webServerConnectionType>::iterator connection = connections.begin();
+    while ( connection != connections.end() ) {
+        if ( now > connection->timeCreated + CONNECTION_TIMEOUT ) {
+            webServerDebug("cleanUpCb(): cleaned out idle connection=0x%x\n", connection->esp_conn);
+            espconn_disconnect( connection->esp_conn );
+            connection = connections.erase( connection );
+        }
+        else {
+            connection++;
+        }
+    }
+}
 
-  espconn_regist_recvcb(newConn, webServerRecvCb);
-  espconn_regist_sentcb(newConn, webServerSentCb);
-  espconn_regist_reconcb(newConn, webServerReconCb);
-  espconn_regist_disconcb(newConn, webServerDisconCb);
+//***********************************************************************
+void ICACHE_FLASH_ATTR webServerConnectCb(void *arg) {
+    webServerConnectionType newConn;
+    newConn.esp_conn = (espconn *)arg;
+    
+    espconn_regist_recvcb(newConn.esp_conn, webServerRecvCb);
+    espconn_regist_sentcb(newConn.esp_conn, webServerSentCb);
+    espconn_regist_reconcb(newConn.esp_conn, webServerReconCb);
+    espconn_regist_disconcb(newConn.esp_conn, webServerDisconCb);
+    
+    newConn.timeCreated = system_get_time();
+    
+    connections.push_back(newConn);
+    
+    webServerDebug("webServerConnectCb(): registered new connection conn=0x%x\n", arg);
+}
+
+//***********************************************************************
+webServerConnectionType* ICACHE_FLASH_ATTR webServerFindConn( espconn *conn ) {
+    webServerDebug("webServerFindConn() findConn=0x%x\n", conn );
+    
+    int i = 0;
+    webServerConnectionType *ret = NULL;
+    
+    SimpleList<webServerConnectionType>::iterator connection = connections.begin();
+    while ( connection != connections.end() ) {
+        webServerDebug("\twebServerFindConn() %d, conn=0x%x", i++, connection->esp_conn );
+        if ( connection->esp_conn == conn ) {
+            webServerDebug(" <--- ");
+            ret = connection;
+        }
+        webServerDebug("\n");
+        connection++;
+    }
+    
+    if ( ret == NULL )
+        webServerDebug("findConnection(espconn): Did not Find\n");
+    
+    return ret;
 }
 
 /***********************************************************************/
 void ICACHE_FLASH_ATTR webServerRecvCb(void *arg, char *data, unsigned short length) {
     
-    char *outGoing;
-    uint16_t outIndex = 0;
-    struct espconn *activeConn = (espconn *)arg;
+//    char *outGoing;
+//    uint16_t outIndex = 0;
+//    struct espconn *activeConn = (espconn *)arg;
+    webServerConnectionType *conn = webServerFindConn( (espconn*)arg );
+    if ( conn == NULL ) {
+        webServerDebug("webServerRecvCb(): err - could not find Connection?\n");
+        return;
+    }
     
     char get[5] = "GET ";
     char path[200];
-    webServerDebug("request=%s\n", data);
-    if ( strstr( data, get) != NULL ) {
+    
+    webServerDebug("request=\n%s\n\n", data);
+    if ( strstr( data, get) != NULL ) {   // GET request
         char *endOfPath = strstr( data, " HTTP" );
         uint32_t pathLength = endOfPath - ( data + strlen( get ) );
         strncpy( path, data + strlen( get ), pathLength );
         path[ pathLength ] = 0;
-        webServerDebug("0path=%s pathLength=%u\n", path, pathLength );
         if( strcmp( path, "/" ) == 0 ) {
             strcpy( path, "/index.html");
         }
-        webServerDebug("1 path=%s\n", path );
+        webServerDebug("path=%s\n", path );
     } else {
         webServerDebug("webServerRecvCb(): request not GET ->%s\n", data);
-        outGoing = (char*)malloc(100);
-        sprintf( outGoing, "HTTP/1.0 501 Not Implemented\r\nContent-Type: text/html\r\n\r\n<h2>Can only accept ->GET<- requests</h2>");
-        espconn_send(activeConn, (uint8*)outGoing, strlen(outGoing));
-        espconn_disconnect( activeConn );
-        free(outGoing);
+        sprintf( conn->buffer, "HTTP/1.0 501 Not Implemented\r\nContent-Type: text/html\r\n\r\n<h2>Can only accept ->GET<- requests</h2>");
+        espconn_send(conn->esp_conn, (uint8*)conn->buffer, strlen(conn->buffer));
         return;
     }
     
-    char ch;
-    char header[200];
+    //char ch;
+    //char header[200];
     char *extension = strstr( path, ".") + 1;
     
     webServerDebug("extension=%s<--\n", extension);
     
-    File f = SPIFFS.open( path, "r" );
-    if ( !f ) {
+    conn->file = SPIFFS.open( path, "r" );
+    if ( !conn->file ) {
         webServerDebug("webServerRecvCb(): file not found ->%s\n", path);
-        outGoing = (char*)malloc(100);
-        sprintf( outGoing, "HTTP/1.0 404 Not Found\r\nContent-Type: text/html\r\n\r\n<h2>File Not Found!</h2>");
-        espconn_send(activeConn, (uint8*)outGoing, outIndex);
-        espconn_disconnect( activeConn );
-        free(outGoing);
+        sprintf( conn->buffer, "HTTP/1.0 404 Not Found\r\nContent-Type: text/html\r\n\r\n<h2>File Not Found!</h2>");
+        espconn_send(conn->esp_conn, (uint8*)conn->buffer, strlen(conn->buffer));
         return;
     }
     
-    webServerDebug("22file Size=%u\n", f.size() );
+    webServerDebug("file Size=%u\n", conn->file.size() );
     webServerDebug("path=%s\n", path );
     
-    sprintf( header, "%s", "HTTP/1.0 200 OK\r\n" );
-    sprintf( header, "%s%s", header, "Server: easyWebServer\r\n");
+    sprintf( conn->buffer, "%s", "HTTP/1.0 200 OK\r\n" );
+    sprintf( conn->buffer, "%s%s", conn->buffer, "Server: easyWebServer\r\n");
     
     if ( strcmp( extension, "html") == 0 )
-        strcat( header, "Content-Type: text/html\r\n" );
+        strcat( conn->buffer, "Content-Type: text/html\r\n" );
     else if ( strcmp( extension, "css") == 0 )
-        strcat( header, "Content-Type: text/css\r\n" );
+        strcat( conn->buffer, "Content-Type: text/css\r\n" );
     else if ( strcmp( extension, "js")  == 0 )
-        strcat( header, "Content-Type: application/javascript\r\n" );
+        strcat( conn->buffer, "Content-Type: application/javascript\r\n" );
     else if ( strcmp( extension, "png")  == 0 )
-        strcat( header, "Content-Type: image/png\r\n" );
+        strcat( conn->buffer, "Content-Type: image/png\r\n" );
     else if ( strcmp( extension, "jpg")  == 0 )
-        strcat( header, "Content-Type: image/jpeg\r\n" );
+        strcat( conn->buffer, "Content-Type: image/jpeg\r\n" );
     else if ( strcmp( extension, "gif")  == 0 )
-        strcat( header, "Content-Type: image/gif\r\n" );
+        strcat( conn->buffer, "Content-Type: image/gif\r\n" );
     else if ( strcmp( extension, "ico")  == 0 )
-        strcat( header, "Content-Type: image/x-icon\r\n" );
-    else
-        webServerDebug("webServerRecvCb(): Wierd file type. path=%s", path );
-    
-    strcat( header, "Content-Length: " );
-    sprintf(header, "%s%u\r\n\r\n", header, f.size() );
-    
-    outIndex = strlen(header);
-    outGoing = (char*)malloc( outIndex + f.size() + 10);
-    strncpy(outGoing, header, outIndex );
-    
-    while ( f.available() ) {
-        outGoing[outIndex++] = f.read();
-        //msgLength++;
-    }
-    
-    outGoing[outIndex] = 0;
-    
-    
-    
-    sint8 err = espconn_send(activeConn, (uint8*)outGoing, outIndex);
-    if ( err == 0 ) {
-        espconn_disconnect( activeConn );
-        free(outGoing);
-        return;
-    }
+        strcat( conn->buffer, "Content-Type: image/x-icon\r\n" );
     else {
-        webServerDebug("espconn_send failed err=%d", err);
-        free(outGoing);
+        webServerDebug("webServerRecvCb(): Unrecognized file type. path=%s\n", path );
+        sprintf( conn->buffer, "HTTP/1.0 415 Unsupported Media Type\r\nContent-Type: text/html\r\n\r\n<h2>Unsupported Media Type!</h2>");
+        espconn_send(conn->esp_conn, (uint8*)conn->buffer, strlen(conn->buffer));
         return;
     }
+    
+    strcat( conn->buffer, "Content-Length: " );
+    sprintf(conn->buffer, "%s%u\r\n\r\n", conn->buffer, conn->file.size() );
+    
+    uint16_t bufferIndex = strlen( conn->buffer );
+    while ( conn->file.available() && bufferIndex < ( BUFFER_SIZE - 1) ) {
+        conn->buffer[ bufferIndex++ ] = conn->file.read();
+    }
+    conn->buffer[bufferIndex] = 0;
+    
+    sint8 err = espconn_send(conn->esp_conn, (uint8*)conn->buffer, bufferIndex );
+    if ( err != 0 ) {
+        webServerDebug("webServerRecvCb(): espconn_send failed err=%d\n", err);
+    }
+    
+    return;
 }
 
 /***********************************************************************/
 void ICACHE_FLASH_ATTR webServerSentCb(void *arg) {
   //data sent successfully
-//  DEBUG_MSG("webServer sent cb \r\r\n");
-  struct espconn *requestconn = (espconn *)arg;
-  espconn_disconnect( requestconn );
+    webServerConnectionType *conn = webServerFindConn( (espconn*)arg );
+    if ( conn == NULL ) {
+        webServerDebug("webServerSentCb(): err - could not find Connection?\n");
+        return;
+    }
+    
+    if ( !conn->file ) {
+        webServerDebug("webServerSentCb(): no file, service completed\n");
+        espconn_disconnect( conn->esp_conn );
+        connections.erase( conn );
+        return;
+    }
+    
+    if ( !conn->file.available() ) {
+        webServerDebug("webServerSentCb(): %s completed\n", conn->file.name() );
+        espconn_disconnect( conn->esp_conn );
+        connections.erase( conn );
+        return;
+    }
+    sprintf( conn->buffer, "");
+    
+    uint16_t bufferIndex = strlen( conn->buffer );
+    while ( conn->file.available() && bufferIndex < ( BUFFER_SIZE - 1) ) {
+        conn->buffer[ bufferIndex++ ] = conn->file.read();
+    }
+    conn->buffer[bufferIndex] = 0;
+    
+    sint8 err = espconn_send(conn->esp_conn, (uint8*)conn->buffer, bufferIndex );
+    if ( err != 0 ) {
+        webServerDebug("webServerSentCb(): espconn_send failed err=%d\n", err);
+    }
+
+    return;
 }
 
 /***********************************************************************/
