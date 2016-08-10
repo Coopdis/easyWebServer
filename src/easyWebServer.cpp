@@ -55,80 +55,100 @@ void ICACHE_FLASH_ATTR webServerConnectCb(void *arg) {
 /***********************************************************************/
 void ICACHE_FLASH_ATTR webServerRecvCb(void *arg, char *data, unsigned short length) {
     
-    char outGoing[500];
+    char *outGoing;
     uint16_t outIndex = 0;
     struct espconn *activeConn = (espconn *)arg;
     
     char get[5] = "GET ";
     char path[200];
-    //webServerDebug("request=%s\n", data);
+    webServerDebug("request=%s\n", data);
     if ( strstr( data, get) != NULL ) {
         char *endOfPath = strstr( data, " HTTP" );
         uint32_t pathLength = endOfPath - ( data + strlen( get ) );
         strncpy( path, data + strlen( get ), pathLength );
         path[ pathLength ] = 0;
-        //webServerDebug("0path=%s pathLength=%u\n", path, pathLength );
+        webServerDebug("0path=%s pathLength=%u\n", path, pathLength );
         if( strcmp( path, "/" ) == 0 ) {
             strcpy( path, "/index.html");
         }
-        //webServerDebug("1 path=%s\n", path );
+        webServerDebug("1 path=%s\n", path );
+    } else {
+        webServerDebug("webServerRecvCb(): request not GET ->%s\n", data);
+        outGoing = (char*)malloc(100);
+        sprintf( outGoing, "HTTP/1.0 501 Not Implemented\r\nContent-Type: text/html\r\n\r\n<h2>Can only accept ->GET<- requests</h2>");
+        espconn_send(activeConn, (uint8*)outGoing, strlen(outGoing));
+        espconn_disconnect( activeConn );
+        free(outGoing);
+        return;
     }
     
     char ch;
     char header[200];
     char *extension = strstr( path, ".") + 1;
     
-    //webServerDebug("extension=%s<--\n", extension);
+    webServerDebug("extension=%s<--\n", extension);
     
     File f = SPIFFS.open( path, "r" );
     if ( !f ) {
-        //webServerDebug("webServerRecvCb(): file not found ->%s\n", path);
+        webServerDebug("webServerRecvCb(): file not found ->%s\n", path);
+        outGoing = (char*)malloc(100);
         sprintf( outGoing, "HTTP/1.0 404 Not Found\r\nContent-Type: text/html\r\n\r\n<h2>File Not Found!</h2>");
-    }
-    else {
-        //webServerDebug("22file Size=%u\n", f.size() );
-        //webServerDebug("path=%s\n", path );
-        
-        sprintf( header, "%s", "HTTP/1.0 200 OK\r\n" );
-        sprintf( header, "%s%s", header, "Server: easyWebServer\r\n");
-        
-        if ( strcmp( extension, "html") == 0 )
-            strcat( header, "Content-Type: text/html\r\n" );
-        else if ( strcmp( extension, "css") == 0 )
-            strcat( header, "Content-Type: text/css\r\n" );
-        else if ( strcmp( extension, "js")  == 0 )
-            strcat( header, "Content-Type: application/javascript\r\n" );
-        else if ( strcmp( extension, "png")  == 0 )
-            strcat( header, "Content-Type: image/png\r\n" );
-        else if ( strcmp( extension, "jpg")  == 0 )
-            strcat( header, "Content-Type: image/jpeg\r\n" );
-        else if ( strcmp( extension, "gif")  == 0 )
-            strcat( header, "Content-Type: image/gif\r\n" );
-        else if ( strcmp( extension, "ico")  == 0 )
-            strcat( header, "Content-Type: image/x-icon\r\n" );
-        else
-            //webServerDebug("webServerRecvCb(): Wierd file type. path=%s", path );
-        
-        strcat( header, "Content-Length: " );
-        sprintf(header, "%s%u\r\n\r\n", header, f.size() );
-
-        //webServerDebug("header len=%u header=\n%s\n", strlen(header), header );
-        
-        outIndex = strlen(header);
-        strncpy(outGoing, header, outIndex );
-        
-        while ( f.available() ) {
-            outGoing[outIndex++] = f.read();
-            //msgLength++;
-        }
-        
-        outGoing[outIndex] = 0;
-        
-        //webServerDebug("outGoing=\n%s\n", outGoing);
+        espconn_send(activeConn, (uint8*)outGoing, outIndex);
+        espconn_disconnect( activeConn );
+        free(outGoing);
+        return;
     }
     
-    espconn_send(activeConn, (uint8*)outGoing, outIndex);
-    espconn_disconnect( activeConn );
+    webServerDebug("22file Size=%u\n", f.size() );
+    webServerDebug("path=%s\n", path );
+    
+    sprintf( header, "%s", "HTTP/1.0 200 OK\r\n" );
+    sprintf( header, "%s%s", header, "Server: easyWebServer\r\n");
+    
+    if ( strcmp( extension, "html") == 0 )
+        strcat( header, "Content-Type: text/html\r\n" );
+    else if ( strcmp( extension, "css") == 0 )
+        strcat( header, "Content-Type: text/css\r\n" );
+    else if ( strcmp( extension, "js")  == 0 )
+        strcat( header, "Content-Type: application/javascript\r\n" );
+    else if ( strcmp( extension, "png")  == 0 )
+        strcat( header, "Content-Type: image/png\r\n" );
+    else if ( strcmp( extension, "jpg")  == 0 )
+        strcat( header, "Content-Type: image/jpeg\r\n" );
+    else if ( strcmp( extension, "gif")  == 0 )
+        strcat( header, "Content-Type: image/gif\r\n" );
+    else if ( strcmp( extension, "ico")  == 0 )
+        strcat( header, "Content-Type: image/x-icon\r\n" );
+    else
+        webServerDebug("webServerRecvCb(): Wierd file type. path=%s", path );
+    
+    strcat( header, "Content-Length: " );
+    sprintf(header, "%s%u\r\n\r\n", header, f.size() );
+    
+    outIndex = strlen(header);
+    outGoing = (char*)malloc( outIndex + f.size() + 10);
+    strncpy(outGoing, header, outIndex );
+    
+    while ( f.available() ) {
+        outGoing[outIndex++] = f.read();
+        //msgLength++;
+    }
+    
+    outGoing[outIndex] = 0;
+    
+    
+    
+    sint8 err = espconn_send(activeConn, (uint8*)outGoing, outIndex);
+    if ( err == 0 ) {
+        espconn_disconnect( activeConn );
+        free(outGoing);
+        return;
+    }
+    else {
+        webServerDebug("espconn_send failed err=%d", err);
+        free(outGoing);
+        return;
+    }
 }
 
 /***********************************************************************/
