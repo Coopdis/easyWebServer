@@ -1,5 +1,5 @@
-#ifndef   _MESH_WEB_SERVER_H_
-#define   _MESH_WEB_SERVER_H_
+#ifndef   _EASY_WEB_SERVER_H_
+#define   _EASY_WEB_SERVER_H_
 
 extern "C" {
 #include "user_interface.h"
@@ -33,4 +33,4 @@ void webServerReconCb(void *arg, sint8 err);
 
 void ICACHE_FLASH_ATTR webServerCleanUpCb( void *arg );
 
-#endif //_MESH_WEB_SERVER_H_
+#endif //_EASY_WEB_SERVER_H_
