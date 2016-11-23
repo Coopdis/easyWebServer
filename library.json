@@ -1,14 +1,13 @@
 {
-  "name": “easyWebServer”,
-  "keywords": “esp8266 web server http”,
-  "description": “A very bare bones web server for esp8266.  It will serve html, css, js, png, jpg, and ico files.  Works quite well with Arduino, but does not require Arduino libraries“,
+  "name": "easyWebServer",
+  "keywords": "esp8266 web server http",
+  "description": "A very bare bones web server for esp8266.  It will serve html, css, js, png, jpg, and ico files.  Works quite well with Arduino, but does not require Arduino libraries",
   "repository":
   {
     "type": "git",
     "url": "https://github.com/Coopdis/easyWebServer"
   },
-  "version": “1.0.0”,
-  "frameworks": “*”,
+  "version": "1.0.0",
+  "frameworks": "*",
   "platforms": "*"
 }
-
